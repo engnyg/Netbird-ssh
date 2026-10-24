@@ -8,6 +8,7 @@ struct NetBirdView: View {
     @State private var addHost: Host?
     @State private var useDeviceCode = false
     @State private var confirmReset = false
+    @State private var diagnostics: URL?
 
     var body: some View {
         NavigationStack {
@@ -57,6 +58,9 @@ struct NetBirdView: View {
                 Section {
                     Button("Reset registration", role: .destructive) { confirmReset = true }
                         .disabled(netbird.signingIn)
+                    if let diagnostics {
+                        ShareLink(item: diagnostics) { Label("Export logs", systemImage: "doc.text.magnifyingglass") }
+                    }
                 }
 
                 if netbird.isConnected {
@@ -86,7 +90,8 @@ struct NetBirdView: View {
                     }
                 }
             }
-            .onAppear { setupKey = netbird.savedSetupKey }
+            .onAppear { setupKey = netbird.savedSetupKey; diagnostics = netbird.diagnosticsFile() }
+            .onChange(of: netbird.state) { _ in diagnostics = netbird.diagnosticsFile() }
             .onDisappear { netbird.saveSetupKey(setupKey) }
             .sheet(item: $addHost) { HostEditView(host: $0) }
             .sheet(item: $netbird.ssoPrompt, onDismiss: {

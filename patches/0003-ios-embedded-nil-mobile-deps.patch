@@ -1,0 +1,35 @@
+diff --git a/client/internal/dns/host_ios.go b/client/internal/dns/host_ios.go
+index 860bb8b..562b4bc 100644
+--- a/client/internal/dns/host_ios.go
++++ b/client/internal/dns/host_ios.go
+@@ -30,6 +30,10 @@ func (a iosHostManager) getOriginalNameservers() []netip.Addr {
+ }
+ 
+ func (a iosHostManager) applyDNSConfig(config HostDNSConfig, _ *statemanager.Manager) error {
++	// The embedded (netstack) client has no Network Extension to hand DNS settings to.
++	if a.dnsManager == nil {
++		return nil
++	}
+ 	jsonData, err := json.Marshal(config)
+ 	if err != nil {
+ 		return fmt.Errorf("marshal: %w", err)
+diff --git a/client/internal/engine.go b/client/internal/engine.go
+index 4de0209..1e0887a 100644
+--- a/client/internal/engine.go
++++ b/client/internal/engine.go
+@@ -2261,9 +2261,12 @@ func (e *Engine) wgInterfaceCreate() (err error) {
+ 	case "android":
+ 		err = e.wgInterface.CreateOnAndroid(e.routeManager.CurrentRouteRange(), e.dnsServer.DnsIP().String(), e.dnsServer.SearchDomains())
+ 	case "ios":
+-		e.mobileDep.NetworkChangeListener.SetInterfaceIP(e.config.WgAddr.String())
+-		if e.config.WgAddr.HasIPv6() {
+-			e.mobileDep.NetworkChangeListener.SetInterfaceIPv6(e.config.WgAddr.IPv6String())
++		// The embedded (netstack) client has no Network Extension to notify.
++		if l := e.mobileDep.NetworkChangeListener; l != nil {
++			l.SetInterfaceIP(e.config.WgAddr.String())
++			if e.config.WgAddr.HasIPv6() {
++				l.SetInterfaceIPv6(e.config.WgAddr.IPv6String())
++			}
+ 		}
+ 		err = e.wgInterface.Create()
+ 	default:

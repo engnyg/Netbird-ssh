@@ -4,6 +4,8 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -239,5 +241,22 @@ func TestSessionPassword(t *testing.T) {
 	}
 	if err := NewSession(nil).Connect(nil, false, host, port, "u", &AuthConfig{}, nil); err == nil {
 		t.Fatal("no creds should fail")
+	}
+}
+
+func TestNewNetworkCreatesLogs(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := NewNetwork("dev", "", "https://example.invalid:443", dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(LogDir(dir), "crash.log")); err != nil {
+		t.Fatalf("crash.log missing: %v", err)
+	}
+	n, _ := NewNetwork("dev", "", "https://example.invalid:443", dir)
+	if n.HasIdentity() {
+		t.Fatal("fresh dir must have no identity")
+	}
+	if err := n.Start(1); err == nil || !strings.Contains(err.Error(), "not signed in") {
+		t.Fatalf("expected not-signed-in error, got %v", err)
 	}
 }

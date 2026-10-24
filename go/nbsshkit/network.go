@@ -55,7 +55,10 @@ func NewNetwork(deviceName, setupKey, managementURL, dataDir string) (*Network, 
 		ManagementURL: managementURL,
 		ConfigPath:    filepath.Join(dataDir, "netbird.json"),
 		StatePath:     filepath.Join(dataDir, "netbird.state"),
-		LogLevel:      "info",
+		LogLevel:      "debug",
+	}
+	if f := setupDiagnostics(dataDir); f != nil {
+		opts.LogOutput = f
 	}
 	return &Network{opts: opts}, nil
 }

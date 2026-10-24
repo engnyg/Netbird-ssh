@@ -126,8 +126,30 @@ final class NetBirdManager: ObservableObject {
     /// Forgets this device's NetBird registration (e.g. after switching servers).
     func resetRegistration() async {
         await disconnect()
-        try? FileManager.default.removeItem(atPath: dataDir)
+        // Keep logs/ so a problem can still be diagnosed afterwards.
+        for name in ["netbird.json", "netbird.state"] {
+            try? FileManager.default.removeItem(atPath: (dataDir as NSString).appendingPathComponent(name))
+        }
         state = .disconnected
+    }
+
+    /// Collects the engine log and any Go crash output into one text file the
+    /// user can share when something goes wrong.
+    func diagnosticsFile() -> URL? {
+        let dir = (dataDir as NSString).appendingPathComponent("logs")
+        var out = "NetBird SSH diagnostics\nmanagement: \(managementURL)\ndevice: \(deviceName)\n\n"
+        var found = false
+        for name in ["crash.prev.log", "crash.log", "netbird.prev.log", "netbird.log"] {
+            let path = (dir as NSString).appendingPathComponent(name)
+            guard let data = FileManager.default.contents(atPath: path), !data.isEmpty else { continue }
+            found = true
+            let text = String(decoding: data.suffix(150_000), as: UTF8.self)
+            out += "===== \(name) =====\n\(text)\n\n"
+        }
+        guard found else { return nil }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("netbirdssh-diagnostics.txt")
+        do { try out.write(to: url, atomically: true, encoding: .utf8) } catch { return nil }
+        return url
     }
 
     func disconnect() async {
