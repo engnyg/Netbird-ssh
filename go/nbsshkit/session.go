@@ -271,7 +271,7 @@ func remoteHost(a net.Addr) string {
 
 // RunCommand executes a single command and returns its combined output. Used
 // for e.g. installing a public key into authorized_keys.
-func (s *Session) RunCommand(cmd string) ([]byte, error) {
+func (s *Session) RunCommand(command string) ([]byte, error) {
 	s.mu.Lock()
 	client := s.client
 	s.mu.Unlock()
@@ -285,6 +285,6 @@ func (s *Session) RunCommand(cmd string) ([]byte, error) {
 	defer sess.Close()
 	var out bytes.Buffer
 	sess.Stdout, sess.Stderr = &out, &out
-	err = sess.Run(cmd)
+	err = sess.Run(command)
 	return out.Bytes(), err
 }

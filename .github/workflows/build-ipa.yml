@@ -49,7 +49,7 @@ jobs:
           export PATH="$PATH:$(go env GOPATH)/bin"
           gomobile init
           mkdir -p ../ios/Frameworks
-          gomobile bind -target=ios -iosversion=16.0 -trimpath -ldflags="-s -w" \
+          gomobile bind -target=ios/arm64 -iosversion=16.0 -trimpath -ldflags="-s -w" \
             -o ../ios/Frameworks/NBSSHKit.xcframework ./nbsshkit
 
       - name: Generate Xcode project
