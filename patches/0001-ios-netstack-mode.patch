@@ -1,0 +1,29 @@
+diff --git a/client/iface/iface_new_ios.go b/client/iface/iface_new_ios.go
+index cedd55c..f3a9352 100644
+--- a/client/iface/iface_new_ios.go
++++ b/client/iface/iface_new_ios.go
+@@ -5,6 +5,7 @@ package iface
+ import (
+ 	"github.com/netbirdio/netbird/client/iface/bind"
+ 	"github.com/netbirdio/netbird/client/iface/device"
++	"github.com/netbirdio/netbird/client/iface/netstack"
+ 	"github.com/netbirdio/netbird/client/iface/wgproxy"
+ )
+ 
+@@ -12,6 +13,16 @@ import (
+ func NewWGIFace(opts WGIFaceOpts) (*WGIface, error) {
+ 	iceBind := bind.NewICEBind(opts.TransportNet, opts.Address, opts.MTU)
+ 
++	// Userspace (netstack) mode keeps the whole WireGuard stack inside the app
++	// process, so no Network Extension / utun file descriptor is required.
++	if netstack.IsEnabled() {
++		return &WGIface{
++			userspaceBind:  true,
++			tun:            device.NewNetstackDevice(opts.IFaceName, opts.Address, opts.WGPort, opts.WGPrivKey, opts.MTU, iceBind, netstack.ListenAddr()),
++			wgProxyFactory: wgproxy.NewUSPFactory(iceBind, opts.MTU),
++		}, nil
++	}
++
+ 	wgIFace := &WGIface{
+ 		tun:            device.NewTunDevice(opts.IFaceName, opts.Address, opts.WGPort, opts.WGPrivKey, opts.MTU, iceBind, opts.MobileArgs.TunFd),
+ 		userspaceBind:  true,

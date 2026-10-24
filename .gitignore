@@ -1,0 +1,7 @@
+.netbird-src
+ios/Frameworks/
+ios/*.xcodeproj
+ios/build/
+*.ipa
+*.xcarchive
+.DS_Store
