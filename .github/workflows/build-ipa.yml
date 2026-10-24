@@ -62,12 +62,15 @@ jobs:
         working-directory: ios
         run: |
           set -o pipefail
+          mkdir -p build
           xcodebuild archive \
+            -skipPackagePluginValidation -skipMacroValidation \
             -project NetBirdSSH.xcodeproj -scheme NetBirdSSH \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -archivePath build/NetBirdSSH.xcarchive \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            | tee build/xcodebuild.log | tail -n 60
+            2>&1 | tee build/xcodebuild.log | grep -E "error:|warning: unre|ARCHIVE|BUILD|\*\*" || true
+          test -d build/NetBirdSSH.xcarchive
 
       - name: Package IPA
         working-directory: ios/build
