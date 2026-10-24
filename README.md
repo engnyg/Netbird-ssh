@@ -20,7 +20,7 @@ iOS App (SwiftUI + SwiftTerm)
          └── golang.org/x/crypto/ssh + netbird client/ssh (PTY)
 ```
 
-netbird 在 iOS 目標上原本只支援 Network Extension 的 tun fd，`patches/0001-ios-netstack-mode.patch` 讓 iOS 也能像 Android 一樣走 netstack 模式。CI 會 clone 固定 commit 的 netbird 並套用 patch（`scripts/fetch-netbird.sh`）。
+netbird 在 iOS 目標上原本只支援 Network Extension 的 tun fd，`patches/0001-ios-netstack-mode.patch` 讓 iOS 也能像 Android 一樣走 netstack 模式；`patches/0002-embed-sso-login.patch` 在 `client/embed` 開放帳號（SSO）登入。CI 會 clone 固定 commit 的 netbird 並套用 patch（`scripts/fetch-netbird.sh`）。
 
 ## 編譯 IPA（GitHub Actions）
 
@@ -33,8 +33,11 @@ netbird 在 iOS 目標上原本只支援 Network Extension 的 tun fd，`patches
 
 ## 使用
 
-1. 在 NetBird 後台建立 **Setup Key**。
-2. App → NetBird 分頁：填 Management URL（自架請改）、裝置名稱、Setup Key → Connect。
+1. App → NetBird 分頁：填 Management URL（自架請改）、裝置名稱。
+2. 登入二選一：
+   - **Sign in with account**：用 NetBird 設定的身分提供者（Google / Microsoft / Okta…）帳號登入，在 App 內的瀏覽器完成；若頁面無法完成可開啟 *Use device code*。
+   - 或貼上後台建立的 **Setup Key**，按 Connect。
+   換伺服器時先按 *Reset registration* 再登入新伺服器。
 3. Keys 分頁：產生金鑰，複製公鑰貼到伺服器 `~/.ssh/authorized_keys`。
 4. Hosts 分頁：新增主機（NetBird IP 或名稱）→ 點擊連線。
 

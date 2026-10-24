@@ -24,14 +24,24 @@ type dialer interface {
 
 // Network is an embedded NetBird peer running entirely inside the app process.
 type Network struct {
-	mu     sync.Mutex
-	client *netbird.Client
-	opts   netbird.Options
+	mu          sync.Mutex
+	client      *netbird.Client
+	opts        netbird.Options
+	cancelLogin context.CancelFunc
+}
+
+// SSOListener receives the result of an interactive account (SSO) login.
+type SSOListener interface {
+	// OnURL is called with the page the user must open. userCode is non-empty
+	// for the device-code flow and must be entered on that page.
+	OnURL(loginURL, userCode string)
+	// OnDone is called once; errMsg is empty on success.
+	OnDone(errMsg string)
 }
 
 // NewNetwork prepares (but does not start) an embedded NetBird peer.
-// setupKey may be empty if the peer was already registered earlier; the
-// persisted config in dataDir is then reused.
+// setupKey may be empty if the peer was already registered earlier (with a
+// setup key or via LoginSSO); the persisted identity in dataDir is then reused.
 func NewNetwork(deviceName, setupKey, managementURL, dataDir string) (*Network, error) {
 	if dataDir == "" {
 		return nil, fmt.Errorf("dataDir is required")
@@ -50,6 +60,55 @@ func NewNetwork(deviceName, setupKey, managementURL, dataDir string) (*Network, 
 	return &Network{opts: opts}, nil
 }
 
+// LoginSSO signs in with the user's account through the management server's
+// identity provider and registers this device. It returns immediately; progress
+// is reported on listener. Call Start afterwards.
+func (n *Network) LoginSSO(listener SSOListener, forceDeviceAuth bool) {
+	ctx, cancel := context.WithCancel(context.Background())
+	n.mu.Lock()
+	if n.cancelLogin != nil {
+		n.cancelLogin()
+	}
+	n.cancelLogin = cancel
+	opts := netbird.SSOLoginOptions{
+		ConfigPath:      n.opts.ConfigPath,
+		ManagementURL:   n.opts.ManagementURL,
+		DeviceName:      n.opts.DeviceName,
+		ForceDeviceAuth: forceDeviceAuth,
+	}
+	n.mu.Unlock()
+
+	go func() {
+		defer cancel()
+		_, err := netbird.LoginSSO(ctx, opts, listener.OnURL)
+		if err != nil {
+			if ctx.Err() != nil {
+				err = fmt.Errorf("login cancelled")
+			}
+			listener.OnDone(err.Error())
+			return
+		}
+		listener.OnDone("")
+	}()
+}
+
+// CancelLogin aborts a LoginSSO in progress.
+func (n *Network) CancelLogin() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.cancelLogin != nil {
+		n.cancelLogin()
+		n.cancelLogin = nil
+	}
+}
+
+// HasIdentity reports whether this device was already registered (so no setup
+// key or SSO login is needed to start).
+func (n *Network) HasIdentity() bool {
+	key, err := netbird.StoredPrivateKey(n.opts.ConfigPath)
+	return err == nil && key != ""
+}
+
 // Start registers with the management server and brings the tunnel up.
 // timeoutSeconds bounds the initial connection.
 func (n *Network) Start(timeoutSeconds int) error {
@@ -58,7 +117,15 @@ func (n *Network) Start(timeoutSeconds int) error {
 	if n.client != nil {
 		return nil
 	}
-	c, err := netbird.New(n.opts)
+	opts := n.opts
+	if opts.SetupKey == "" {
+		key, err := netbird.StoredPrivateKey(opts.ConfigPath)
+		if err != nil || key == "" {
+			return fmt.Errorf("not signed in: enter a setup key or sign in with your account")
+		}
+		opts.PrivateKey = key
+	}
+	c, err := netbird.New(opts)
 	if err != nil {
 		return err
 	}

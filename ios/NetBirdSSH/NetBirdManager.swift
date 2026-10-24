@@ -1,6 +1,13 @@
 import Foundation
 import NBSSHKit
 
+struct SSOPrompt: Identifiable {
+    let id = UUID()
+    let url: URL
+    /// Non-empty for the device-code flow: the code to enter on the login page.
+    let userCode: String
+}
+
 struct Peer: Identifiable, Hashable {
     var id: String { fqdn }
     let fqdn: String
@@ -20,6 +27,10 @@ final class NetBirdManager: ObservableObject {
 
     @Published private(set) var state: State = .disconnected
     @Published private(set) var peers: [Peer] = []
+    @Published var ssoPrompt: SSOPrompt?
+    @Published private(set) var signingIn = false
+    private var loginNetwork: NBSSHKitNetwork?
+    private var ssoListener: SSOBridge?
 
     @Published var managementURL: String { didSet { defaults.set(managementURL, forKey: "mgmtURL") } }
     @Published var deviceName: String { didSet { defaults.set(deviceName, forKey: "deviceName") } }
@@ -70,6 +81,55 @@ final class NetBirdManager: ObservableObject {
         }
     }
 
+    // MARK: Account (SSO) login
+
+    /// Signs in with the account configured on the management server's identity
+    /// provider (Google, Microsoft, Okta, ...), then brings the tunnel up.
+    func signInWithAccount(deviceCode: Bool) {
+        guard !signingIn, state != .connecting, state != .connected else { return }
+        var err: NSError?
+        guard let net = NBSSHKitNewNetwork(deviceName, "", managementURL, dataDir, &err) else {
+            state = .failed(err?.localizedDescription ?? "Could not prepare login")
+            return
+        }
+        let bridge = SSOBridge(owner: self)
+        loginNetwork = net
+        ssoListener = bridge
+        signingIn = true
+        state = .disconnected
+        net.loginSSO(bridge, forceDeviceAuth: deviceCode)
+    }
+
+    func cancelSignIn() {
+        loginNetwork?.cancelLogin()
+        finishSignIn(error: nil)
+    }
+
+    fileprivate func showLogin(url: String, code: String) {
+        guard let u = URL(string: url) else { return }
+        ssoPrompt = SSOPrompt(url: u, userCode: code)
+    }
+
+    fileprivate func finishSignIn(error: String?) {
+        ssoPrompt = nil
+        signingIn = false
+        loginNetwork = nil
+        ssoListener = nil
+        guard let error else { return }          // cancelled by the user
+        if error.isEmpty {
+            Task { await connect() }              // signed in
+        } else {
+            state = .failed(error)
+        }
+    }
+
+    /// Forgets this device's NetBird registration (e.g. after switching servers).
+    func resetRegistration() async {
+        await disconnect()
+        try? FileManager.default.removeItem(atPath: dataDir)
+        state = .disconnected
+    }
+
     func disconnect() async {
         guard let net = network else { state = .disconnected; return }
         network = nil
@@ -90,5 +150,20 @@ final class NetBirdManager: ObservableObject {
             guard f.count == 3 else { return nil }
             return Peer(fqdn: f[0], ip: f[1], status: f[2])
         }.sorted { $0.fqdn < $1.fqdn }
+    }
+}
+
+private final class SSOBridge: NSObject, NBSSHKitSSOListenerProtocol {
+    weak var owner: NetBirdManager?
+    init(owner: NetBirdManager) { self.owner = owner }
+
+    func onURL(_ loginURL: String?, userCode: String?) {
+        let (u, c) = (loginURL ?? "", userCode ?? "")
+        Task { @MainActor [weak owner] in owner?.showLogin(url: u, code: c) }
+    }
+
+    func onDone(_ errMsg: String?) {
+        let msg = errMsg ?? ""
+        Task { @MainActor [weak owner] in owner?.finishSignIn(error: msg) }
     }
 }

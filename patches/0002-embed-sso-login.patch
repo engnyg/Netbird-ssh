@@ -1,0 +1,115 @@
+diff --git a/client/embed/sso.go b/client/embed/sso.go
+new file mode 100644
+index 0000000..e2bcfa7
+--- /dev/null
++++ b/client/embed/sso.go
+@@ -0,0 +1,109 @@
++package embed
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"time"
++
++	"github.com/netbirdio/netbird/client/internal/auth"
++	"github.com/netbirdio/netbird/client/internal/profilemanager"
++	"github.com/netbirdio/netbird/client/system"
++)
++
++// ErrSSONotSupported is returned when the management server offers neither the
++// PKCE nor the device authorization flow.
++var ErrSSONotSupported = errors.New("management server does not support SSO login")
++
++// SSOLoginOptions configures LoginSSO.
++type SSOLoginOptions struct {
++	// ConfigPath is the netbird config file; it is created if missing and keeps
++	// the peer identity (WireGuard key) that is later used by Client.
++	ConfigPath    string
++	ManagementURL string
++	DeviceName    string
++	// ForceDeviceAuth uses the device code flow instead of PKCE.
++	ForceDeviceAuth bool
++}
++
++// LoginSSO signs the peer in with the user's identity provider account and
++// registers it on the management server. onURL is called with the page the user
++// must open (and, for the device flow, the code to enter). It blocks until the
++// user finished or ctx is done. On success the config at ConfigPath holds the
++// peer identity, so the peer can be started with Options.PrivateKey set to the
++// returned key.
++func LoginSSO(ctx context.Context, opts SSOLoginOptions, onURL func(verificationURL, userCode string)) (privateKey string, err error) {
++	if opts.ConfigPath == "" {
++		return "", errors.New("config path is required")
++	}
++	cfg, err := profilemanager.UpdateOrCreateConfig(profilemanager.ConfigInput{
++		ConfigPath:    opts.ConfigPath,
++		ManagementURL: opts.ManagementURL,
++	})
++	if err != nil {
++		return "", fmt.Errorf("create config: %w", err)
++	}
++
++	//nolint:staticcheck
++	ctx = context.WithValue(ctx, system.DeviceNameCtxKey, opts.DeviceName)
++
++	authClient, err := auth.NewAuth(ctx, cfg.PrivateKey, cfg.ManagementURL, cfg)
++	if err != nil {
++		return "", fmt.Errorf("create auth client: %w", err)
++	}
++	defer func() { _ = authClient.Close() }()
++
++	needsLogin, err := authClient.IsLoginRequired(ctx)
++	if err != nil {
++		return "", fmt.Errorf("check login requirement: %w", err)
++	}
++
++	jwt := ""
++	if needsLogin {
++		supported, err := authClient.IsSSOSupported(ctx)
++		if err != nil {
++			return "", fmt.Errorf("check SSO support: %w", err)
++		}
++		if !supported {
++			return "", ErrSSONotSupported
++		}
++
++		flow, err := authClient.GetOAuthFlow(ctx, opts.ForceDeviceAuth, false, "")
++		if err != nil {
++			return "", fmt.Errorf("get OAuth flow: %w", err)
++		}
++		infoCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
++		info, err := flow.RequestAuthInfo(infoCtx)
++		cancel()
++		if err != nil {
++			return "", fmt.Errorf("request auth info: %w", err)
++		}
++		onURL(info.VerificationURIComplete, info.UserCode)
++
++		waitCtx, cancel := context.WithTimeout(ctx, time.Duration(info.ExpiresIn)*time.Second)
++		defer cancel()
++		token, err := flow.WaitToken(waitCtx, info)
++		if err != nil {
++			return "", fmt.Errorf("waiting for browser login: %w", err)
++		}
++		jwt = token.GetTokenToUse()
++	}
++
++	if err, _ := authClient.Login(ctx, "", jwt); err != nil {
++		return "", fmt.Errorf("login: %w", err)
++	}
++	return cfg.PrivateKey, nil
++}
++
++// StoredPrivateKey returns the peer's WireGuard private key from an existing
++// config file, or "" if the peer was never registered with it.
++func StoredPrivateKey(configPath string) (string, error) {
++	if configPath == "" {
++		return "", errors.New("config path is required")
++	}
++	cfg, err := profilemanager.ReadConfigOrDefault(configPath)
++	if err != nil {
++		return "", err
++	}
++	return cfg.PrivateKey, nil
++}

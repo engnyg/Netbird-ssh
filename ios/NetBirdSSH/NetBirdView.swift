@@ -1,3 +1,4 @@
+import SafariServices
 import SwiftUI
 
 struct NetBirdView: View {
@@ -5,6 +6,8 @@ struct NetBirdView: View {
     @EnvironmentObject var store: Store
     @State private var setupKey = ""
     @State private var addHost: Host?
+    @State private var useDeviceCode = false
+    @State private var confirmReset = false
 
     var body: some View {
         NavigationStack {
@@ -27,15 +30,33 @@ struct NetBirdView: View {
                     Toggle("Connect on launch", isOn: $netbird.autoConnect)
                 }
 
-                Section(header: Text("Account"),
-                        footer: Text("Create a setup key in the NetBird dashboard (Setup Keys). It is only needed the first time; the device then stays registered. Self-hosted? Change the management URL.")) {
+                Section(header: Text("Server"),
+                        footer: Text("Self-hosted? Change the management URL, then use “Reset registration” before signing in to the new server.")) {
                     TextField("Management URL", text: $netbird.managementURL)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                     TextField("Device name", text: $netbird.deviceName)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("Setup key", text: $setupKey)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .onChange(of: setupKey) { netbird.saveSetupKey($0) }
+                }
+
+                if !netbird.isConnected {
+                    Section(header: Text("Sign in"),
+                            footer: Text("Account login opens your NetBird identity provider (Google, Microsoft, Okta, ...). Turn on “Use device code” if the sign-in page does not complete. A setup key is only needed the first time; the device then stays registered.")) {
+                        Button {
+                            netbird.signInWithAccount(deviceCode: useDeviceCode)
+                        } label: {
+                            Label("Sign in with account", systemImage: "person.crop.circle")
+                        }
+                        .disabled(netbird.signingIn || netbird.state == .connecting)
+                        Toggle("Use device code", isOn: $useDeviceCode)
+                        SecureField("…or paste a setup key", text: $setupKey)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .onChange(of: setupKey) { netbird.saveSetupKey($0) }
+                    }
+                }
+
+                Section {
+                    Button("Reset registration", role: .destructive) { confirmReset = true }
+                        .disabled(netbird.signingIn)
                 }
 
                 if netbird.isConnected {
@@ -68,6 +89,17 @@ struct NetBirdView: View {
             .onAppear { setupKey = netbird.savedSetupKey }
             .onDisappear { netbird.saveSetupKey(setupKey) }
             .sheet(item: $addHost) { HostEditView(host: $0) }
+            .sheet(item: $netbird.ssoPrompt, onDismiss: {
+                if netbird.signingIn { netbird.cancelSignIn() }
+            }) { prompt in
+                SSOSheet(prompt: prompt) { netbird.cancelSignIn() }
+            }
+            .confirmationDialog("Forget this device's NetBird registration?", isPresented: $confirmReset,
+                                titleVisibility: .visible) {
+                Button("Reset registration", role: .destructive) { Task { await netbird.resetRegistration() } }
+            } message: {
+                Text("You will need to sign in again. Hosts and keys are kept.")
+            }
         }
     }
 
@@ -87,4 +119,43 @@ struct NetBirdView: View {
         case .disconnected: return .gray
         }
     }
+}
+
+/// Shows the identity provider's page inside the app so the app stays in the
+/// foreground while the login completes. For the device-code flow the code is
+/// shown above the page.
+private struct SSOSheet: View {
+    let prompt: SSOPrompt
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Sign in").font(.headline)
+                Spacer()
+                Button("Cancel", action: onCancel)
+            }
+            .padding()
+            if !prompt.userCode.isEmpty {
+                VStack(spacing: 6) {
+                    Text("Enter this code on the page below").font(.footnote).foregroundStyle(.secondary)
+                    Text(prompt.userCode).font(.system(.title, design: .monospaced).bold()).textSelection(.enabled)
+                    Button("Copy code") { UIPasteboard.general.string = prompt.userCode }
+                        .buttonStyle(.bordered)
+                }
+                .padding(.bottom, 12)
+            }
+            SafariView(url: prompt.url)
+        }
+    }
+}
+
+private struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        let config = SFSafariViewController.Configuration()
+        config.barCollapsingEnabled = false
+        return SFSafariViewController(url: url, configuration: config)
+    }
+    func updateUIViewController(_ vc: SFSafariViewController, context: Context) {}
 }
