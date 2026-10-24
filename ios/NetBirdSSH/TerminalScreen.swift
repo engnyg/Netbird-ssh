@@ -22,7 +22,8 @@ struct TerminalRepresentable: UIViewRepresentable {
 
     func updateUIView(_ uiView: SwiftTerm.TerminalView, context: Context) {}
 
-    final class Coordinator: NSObject, TerminalViewDelegate {
+    @MainActor
+    final class Coordinator: NSObject, @preconcurrency TerminalViewDelegate {
         let session: TerminalSession
         init(session: TerminalSession) { self.session = session }
 

@@ -80,7 +80,11 @@ final class NetBirdManager: ObservableObject {
 
     func refreshPeers() async {
         guard let net = network else { return }
-        let raw: String = await Task.detached { (try? net.peers()) ?? "" }.value
+        let raw: String = await Task.detached {
+            var err: NSError?
+            let out = net.peers(&err)
+            return err == nil ? out : ""
+        }.value
         peers = raw.split(separator: "\n").compactMap { line in
             let f = line.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
             guard f.count == 3 else { return nil }
